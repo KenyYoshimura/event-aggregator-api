@@ -148,12 +148,11 @@ app.get('/api/events/all', async (req, res) => {
       return res.json(cached);
     }
 
-    const [gizmodoEvents, prtimesEvents] = await Promise.all([
-      fetchGizmodoEvents(),
-      fetchPRTimesEvents(['snowpeak'])
-    ]);
+    const gizmodoEvents = await fetchGizmodoEvents();
+const prtimesEvents = await fetchAllPRTimesEvents();
+const allEventsData = [...gizmodoEvents, ...prtimesEvents];
 
-    const allEvents = [...gizmodoEvents, ...prtimesEvents]
+    const allEvents = allEventsData
       .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
       .slice(0, 100);
 
@@ -256,7 +255,30 @@ async function fetchPRTimesEvents(companies) {
 
   return allEvents;
 }
-
+async function fetchAllPRTimesEvents() {
+  try {
+    // PRTIMESの新着リリース全体から取得
+    const rssUrl = 'https://prtimes.jp/main/html/searchrlp/page/rss';
+    const feed = await parser.parseURL(rssUrl);
+    
+    return feed.items
+      .filter(item => isEventRelated(item))
+      .map(item => ({
+        id: item.guid || item.link,
+        title: item.title,
+        description: item.contentSnippet || item.content,
+        url: item.link,
+        publishDate: item.pubDate || item.isoDate,
+        source: 'PRTIMES',
+        category: 'プレスリリース',
+        imageUrl: extractImageUrl(item)
+      }))
+      .slice(0, 30);
+  } catch (error) {
+    console.error('PRTIMES all events fetch error:', error);
+    return [];
+  }
+}
 // サーバー起動
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
