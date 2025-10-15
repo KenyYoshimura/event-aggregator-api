@@ -1,6 +1,4 @@
 // イベント情報取得API
-// Railway/Render/Herokuにデプロイ可能
-
 const express = require('express');
 const Parser = require('rss-parser');
 const cors = require('cors');
@@ -33,7 +31,7 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       gizmodo: '/api/events/gizmodo',
-      prtimes: '/api/events/prtimes?companies=nanga,chums,patagonia',
+      prtimes: '/api/events/prtimes',
       all: '/api/events/all'
     }
   });
@@ -47,22 +45,7 @@ app.get('/api/events/gizmodo', async (req, res) => {
       return res.json(cached);
     }
 
-    const feed = await parser.parseURL('http://feeds.gizmodo.jp/rss/gizmodo/index.xml');
-    
-    const events = feed.items
-      .filter(item => isEventRelated(item))
-      .map(item => ({
-        id: item.guid || item.link,
-        title: item.title,
-        description: item.contentSnippet || item.content,
-        url: item.link,
-        publishDate: item.pubDate || item.isoDate,
-        source: 'GIZMODO',
-        category: 'テック',
-        imageUrl: extractImageUrl(item)
-      }))
-      .slice(0, 20);
-
+    const events = await fetchGizmodoEvents();
     cache.set('gizmodo', events);
     res.json(events);
   } catch (error) {
@@ -71,69 +54,17 @@ app.get('/api/events/gizmodo', async (req, res) => {
   }
 });
 
-// PRTIMES企業別イベント取得
+// PRTIMESのイベント情報取得
 app.get('/api/events/prtimes', async (req, res) => {
   try {
-    const companies = req.query.companies ? req.query.companies.split(',') : [];
-    
-    if (companies.length === 0) {
-      return res.status(400).json({ error: 'companies parameter required' });
-    }
-
-    const cacheKey = `prtimes_${companies.join('_')}`;
-    const cached = cache.get(cacheKey);
+    const cached = cache.get('prtimes');
     if (cached) {
       return res.json(cached);
     }
 
-    // PRTIMES企業ID マッピング
-    const companyIds = {
-      'snowpeak': '73237',
-      'nanga': '00000',
-      'chums': '00000',
-      'patagonia': '00000',
-      'coleman': '00000',
-      'danner': '00000',
-      'goldwin': '00000',
-      'keen': '00000',
-      'callaway': '00000'
-    };
-
-    const allEvents = [];
-
-    for (const company of companies) {
-      const companyId = companyIds[company.toLowerCase()];
-      if (!companyId || companyId === '00000') continue;
-
-      try {
-        const rssUrl = `https://prtimes.jp/main/html/searchrlp/company_id/${companyId}/rss_company.xml`;
-        const feed = await parser.parseURL(rssUrl);
-        
-        const events = feed.items
-          .filter(item => isEventRelated(item))
-          .map(item => ({
-            id: item.guid || item.link,
-            title: item.title,
-            description: item.contentSnippet || item.content,
-            url: item.link,
-            publishDate: item.pubDate || item.isoDate,
-            source: `PRTIMES - ${company}`,
-            category: 'プレスリリース',
-            imageUrl: extractImageUrl(item)
-          }));
-
-        allEvents.push(...events);
-      } catch (err) {
-        console.error(`Error fetching ${company}:`, err);
-      }
-    }
-
-    allEvents.sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate));
-    
-    const limitedEvents = allEvents.slice(0, 50);
-    cache.set(cacheKey, limitedEvents);
-    
-    res.json(limitedEvents);
+    const events = await fetchPRTimesEvents();
+    cache.set('prtimes', events);
+    res.json(events);
   } catch (error) {
     console.error('PRTIMES fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch PRTIMES events' });
@@ -149,10 +80,9 @@ app.get('/api/events/all', async (req, res) => {
     }
 
     const gizmodoEvents = await fetchGizmodoEvents();
-const prtimesEvents = await fetchAllPRTimesEvents();
-const allEventsData = [...gizmodoEvents, ...prtimesEvents];
+    const prtimesEvents = await fetchPRTimesEvents();
 
-    const allEvents = allEventsData
+    const allEvents = [...gizmodoEvents, ...prtimesEvents]
       .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
       .slice(0, 100);
 
@@ -164,7 +94,7 @@ const allEventsData = [...gizmodoEvents, ...prtimesEvents];
   }
 });
 
-// ヘルパー関数
+// ヘルパー関数: イベント関連かチェック
 function isEventRelated(item) {
   const eventKeywords = [
     'イベント', 'キャンペーン', '開催', '発売', 'リリース',
@@ -176,6 +106,7 @@ function isEventRelated(item) {
   return eventKeywords.some(keyword => text.includes(keyword));
 }
 
+// ヘルパー関数: 画像URL抽出
 function extractImageUrl(item) {
   if (item.enclosure && item.enclosure.url) {
     return item.enclosure.url;
@@ -193,6 +124,7 @@ function extractImageUrl(item) {
   return null;
 }
 
+// GIZMODO取得関数
 async function fetchGizmodoEvents() {
   try {
     const feed = await parser.parseURL('http://feeds.gizmodo.jp/rss/gizmodo/index.xml');
@@ -215,52 +147,10 @@ async function fetchGizmodoEvents() {
   }
 }
 
-async function fetchPRTimesEvents(companies) {
-  const companyIds = {
-    'snowpeak': '73237',
-    'nanga': '00000',
-    'chums': '00000',
-    'patagonia': '00000',
-    'coleman': '00000'
-  };
-
-  const allEvents = [];
-
-  for (const company of companies) {
-    const companyId = companyIds[company.toLowerCase()];
-    if (!companyId || companyId === '00000') continue;
-
-    try {
-      const rssUrl = `https://prtimes.jp/main/html/searchrlp/company_id/${companyId}/rss_company.xml`;
-      const feed = await parser.parseURL(rssUrl);
-      
-      const events = feed.items
-        .filter(item => isEventRelated(item))
-        .map(item => ({
-          id: item.guid || item.link,
-          title: item.title,
-          description: item.contentSnippet || item.content,
-          url: item.link,
-          publishDate: item.pubDate || item.isoDate,
-          source: `PRTIMES - ${company}`,
-          category: 'プレスリリース',
-          imageUrl: extractImageUrl(item)
-        }));
-
-      allEvents.push(...events);
-    } catch (err) {
-      console.error(`Internal error fetching ${company}:`, err);
-    }
-  }
-
-  return allEvents;
-}
-async function fetchAllPRTimesEvents() {
+// PRTIMES取得関数
+async function fetchPRTimesEvents() {
   try {
-    // PRTIMESの新着リリース全体から取得
-    const rssUrl = 'https://prtimes.jp/main/html/searchrlp/page/rss';
-    const feed = await parser.parseURL(rssUrl);
-    
+    const feed = await parser.parseURL('https://prtimes.jp/index.rdf');
     return feed.items
       .filter(item => isEventRelated(item))
       .map(item => ({
@@ -275,10 +165,11 @@ async function fetchAllPRTimesEvents() {
       }))
       .slice(0, 30);
   } catch (error) {
-    console.error('PRTIMES all events fetch error:', error);
+    console.error('PRTIMES fetch error:', error);
     return [];
   }
 }
+
 // サーバー起動
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
