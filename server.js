@@ -3,259 +3,318 @@ const Parser = require('rss-parser');
 const cors = require('cors');
 const NodeCache = require('node-cache');
 const axios = require('axios');
-const cheerio = require('cheerio');
 
 const app = express();
 const parser = new Parser({
-  timeout: 10000,
   customFields: {
-    item: [
-      ['dc:date', 'dcDate'],
-      ['pubDate', 'pubDate'],
-      ['media:thumbnail', 'thumbnail'],
-      ['media:content', 'mediaContent']
-    ]
+    item: ['dc:creator', 'content:encoded']
   }
 });
 
-// キャッシュ設定(1時間)
-const cache = new NodeCache({ stdTTL: 3600 });
+// キャッシュ設定 (30分)
+const cache = new NodeCache({ stdTTL: 1800 });
 
 app.use(cors());
 app.use(express.json());
 
-// ヘルスチェック
-app.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'Event Aggregator API',
-    version: '2.0.0',
-    endpoints: {
-      gizmodo: '/api/events/gizmodo',
-      prtimes: '/api/events/prtimes',
-      facilities: '/api/events/facilities',
-      all: '/api/events/all'
-    }
-  });
-});
+// イベント関連のキーワード
+const eventKeywords = [
+  'イベント', 'event', '開催', '展示', '展覧会', 'エキシビション', 'exhibition',
+  'フェス', 'festival', 'ライブ', 'live', 'コンサート', 'concert',
+  'ワークショップ', 'workshop', 'セミナー', 'seminar', '体験', 'experience',
+  '限定', '期間限定', 'ポップアップ', 'popup', 'pop-up', 'キャンペーン', 'campaign',
+  '発売', 'release', 'オープン', 'open', 'グランドオープン', 'grand opening',
+  'コラボ', 'collaboration', '特別', 'special', 'フェア', 'fair'
+];
 
-// GIZMODOのイベント情報取得
-app.get('/api/events/gizmodo', async (req, res) => {
+// テキストがイベント関連かどうかを判定
+function isEventRelated(text) {
+  if (!text) return false;
+  const lowerText = text.toLowerCase();
+  return eventKeywords.some(keyword => lowerText.includes(keyword.toLowerCase()));
+}
+
+// RSSフィードを取得する汎用関数
+async function fetchRSSFeed(url, sourceName) {
   try {
-    const cached = cache.get('gizmodo');
-    if (cached) {
-      return res.json(cached);
-    }
-
-    const events = await fetchGizmodoEvents();
-    cache.set('gizmodo', events);
-    res.json(events);
+    const feed = await parser.parseURL(url);
+    return feed.items.map(item => ({
+      title: item.title || '',
+      link: item.link || '',
+      pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
+      source: sourceName,
+      description: item.contentSnippet || item.description || '',
+      isEvent: isEventRelated(item.title) || isEventRelated(item.contentSnippet || item.description)
+    }));
   } catch (error) {
-    console.error('GIZMODO fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch GIZMODO events' });
+    console.error(`Error fetching ${sourceName}:`, error.message);
+    return [];
   }
-});
+}
 
-// PRTIMESのイベント情報取得
-app.get('/api/events/prtimes', async (req, res) => {
+// FC東京のRSSを取得 (特殊なURLから抽出)
+async function fetchFCTokyoRSS() {
   try {
-    const cached = cache.get('prtimes');
-    if (cached) {
-      return res.json(cached);
-    }
-
-    const events = await fetchPRTimesEvents();
-    cache.set('prtimes', events);
-    res.json(events);
+    const response = await axios.get('http://rss.phew.homeip.net/news.php');
+    const parser = new Parser();
+    const feed = await parser.parseString(response.data);
+    
+    // FC東京に関連する項目だけをフィルター
+    const fcTokyoItems = feed.items.filter(item => 
+      item.title && (item.title.includes('FC東京') || item.title.includes('FC Tokyo'))
+    );
+    
+    return fcTokyoItems.map(item => ({
+      title: item.title || '',
+      link: item.link || '',
+      pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
+      source: 'FC東京',
+      description: item.contentSnippet || item.description || '',
+      isEvent: isEventRelated(item.title) || isEventRelated(item.contentSnippet || item.description)
+    }));
   } catch (error) {
-    console.error('PRTIMES fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch PRTIMES events' });
+    console.error('Error fetching FC Tokyo RSS:', error.message);
+    return [];
   }
-});
+}
 
-// 商業施設のイベント情報取得
-app.get('/api/events/facilities', async (req, res) => {
-  try {
-    const cached = cache.get('facilities');
-    if (cached) {
-      return res.json(cached);
+// PRTIMES 企業群のRSSを取得 (一覧表示)
+async function fetchPRTimesCompanies() {
+  const companyIds = [169497, 130855, 34897, 32114, 3710, 12471, 7414, 130313];
+  const allItems = [];
+  
+  for (const id of companyIds) {
+    try {
+      const url = `https://prtimes.jp/main/html/searchrlp/company_id/${id}/rss_company.xml`;
+      const feed = await parser.parseURL(url);
+      
+      const items = feed.items.map(item => ({
+        title: item.title || '',
+        link: item.link || '',
+        pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
+        source: `PRTIMES (企業ID: ${id})`,
+        description: item.contentSnippet || item.description || '',
+        isEvent: isEventRelated(item.title) || isEventRelated(item.contentSnippet || item.description)
+      }));
+      
+      allItems.push(...items);
+    } catch (error) {
+      console.error(`Error fetching PRTIMES company ${id}:`, error.message);
     }
-
-    const events = await fetchFacilitiesEvents();
-    cache.set('facilities', events);
-    res.json(events);
-  } catch (error) {
-    console.error('Facilities fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch facilities events' });
   }
-});
+  
+  return allItems;
+}
 
-// すべてのイベント取得
-app.get('/api/events/all', async (req, res) => {
-  try {
-    const cached = cache.get('all_events');
-    if (cached) {
-      return res.json(cached);
+// GIZMODOのRSSを取得
+async function fetchGizmodoRSS() {
+  return await fetchRSSFeed('https://www.gizmodo.jp/index.xml', 'GIZMODO');
+}
+
+// 既存のPRTIMESイベントRSSを取得
+async function fetchPRTimesRSS() {
+  return await fetchRSSFeed('https://prtimes.jp/technology/rss.xml', 'PRTIMES');
+}
+
+// 新しいRSSフィードを取得
+async function fetchOCEANS() {
+  return await fetchRSSFeed('https://oceans.tokyo.jp/feed/', 'OCEANS');
+}
+
+async function fetchITmediaBusiness() {
+  return await fetchRSSFeed('https://rss.itmedia.co.jp/rss/1.0/business.xml', 'ITmedia ビジネスオンライン');
+}
+
+async function fetchGQJapan() {
+  return await fetchRSSFeed('https://www.gqjapan.jp/feed/', 'GQ JAPAN');
+}
+
+async function fetchWiredJP() {
+  return await fetchRSSFeed('https://wired.jp/feed/', 'WIRED.jp');
+}
+
+async function fetchWWDJapan() {
+  return await fetchRSSFeed('https://www.wwdjapan.com/feed/', 'WWDJAPAN');
+}
+
+async function fetchFashionPress() {
+  return await fetchRSSFeed('http://www.fashion-press.net/news/index.rss', 'FASHION PRESS');
+}
+
+async function fetchJFA() {
+  return await fetchRSSFeed('https://www.jfa.jp/feed.rss', 'JFA');
+}
+
+// 商業施設のリンク集
+function getFacilitiesLinks() {
+  return [
+    {
+      name: '六本木ヒルズ',
+      link: 'https://www.roppongihills.com/events/',
+      description: '六本木ヒルズのイベント情報'
+    },
+    {
+      name: '麻布台ヒルズ',
+      link: 'https://www.azabudai-hills.com/events/',
+      description: '麻布台ヒルズのイベント情報'
+    },
+    {
+      name: '東京スカイツリー',
+      link: 'https://www.tokyo-skytree.jp/event/',
+      description: '東京スカイツリーのイベント情報'
+    },
+    {
+      name: '二子玉川ライズ',
+      link: 'https://www.rise.sc/event/',
+      description: '二子玉川ライズのイベント情報'
+    },
+    {
+      name: '表参道ヒルズ',
+      link: 'https://www.omotesandohills.com/events/',
+      description: '表参道ヒルズのイベント情報'
     }
-
-    const gizmodoEvents = await fetchGizmodoEvents();
-    const prtimesEvents = await fetchPRTimesEvents();
-    const facilitiesEvents = await fetchFacilitiesEvents();
-
-    const allEvents = [...gizmodoEvents, ...prtimesEvents, ...facilitiesEvents]
-      .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
-      .slice(0, 100);
-
-    cache.set('all_events', allEvents);
-    res.json(allEvents);
-  } catch (error) {
-    console.error('All events fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch events' });
-  }
-});
-
-// ヘルパー関数: イベント関連かチェック
-function isEventRelated(item) {
-  const eventKeywords = [
-    'イベント', 'キャンペーン', '開催', '発売', 'リリース',
-    'オープン', '開業', '展示', 'セール', 'フェス', 'フェア',
-    'ワークショップ', '体験', '限定', '新作', '登場'
   ];
-  
-  const text = `${item.title} ${item.contentSnippet || ''}`.toLowerCase();
-  return eventKeywords.some(keyword => text.includes(keyword));
 }
 
-// ヘルパー関数: 画像URL抽出
-function extractImageUrl(item) {
-  if (item.enclosure && item.enclosure.url) {
-    return item.enclosure.url;
-  }
-  if (item.thumbnail && item.thumbnail.url) {
-    return item.thumbnail.url;
-  }
+// 全てのイベント情報を取得
+async function getAllEvents() {
+  const cacheKey = 'all_events';
+  const cachedData = cache.get(cacheKey);
   
-  const content = item.content || item['content:encoded'] || '';
-  const imgMatch = content.match(/<img[^>]+src="([^">]+)"/);
-  if (imgMatch) {
-    return imgMatch[1];
+  if (cachedData) {
+    console.log('Returning cached data');
+    return cachedData;
   }
-  
-  return null;
-}
 
-// GIZMODO取得関数
-async function fetchGizmodoEvents() {
-  try {
-    const feed = await parser.parseURL('http://feeds.gizmodo.jp/rss/gizmodo/index.xml');
-    return feed.items
-      .filter(item => isEventRelated(item))
-      .map(item => ({
-        id: item.guid || item.link,
-        title: item.title,
-        description: item.contentSnippet || item.content,
-        url: item.link,
-        publishDate: item.pubDate || item.isoDate,
-        source: 'GIZMODO',
-        category: 'テック',
-        imageUrl: extractImageUrl(item)
-      }))
-      .slice(0, 20);
-  } catch (error) {
-    console.error('GIZMODO internal fetch error:', error);
-    return [];
-  }
-}
+  console.log('Fetching fresh data...');
+  
+  const [
+    gizmodo,
+    prtimes,
+    prTimesCompanies,
+    oceans,
+    itmediaBusiness,
+    gqJapan,
+    wiredJP,
+    wwdJapan,
+    fashionPress,
+    jfa,
+    fcTokyo
+  ] = await Promise.all([
+    fetchGizmodoRSS(),
+    fetchPRTimesRSS(),
+    fetchPRTimesCompanies(),
+    fetchOCEANS(),
+    fetchITmediaBusiness(),
+    fetchGQJapan(),
+    fetchWiredJP(),
+    fetchWWDJapan(),
+    fetchFashionPress(),
+    fetchJFA(),
+    fetchFCTokyoRSS()
+  ]);
 
-// PRTIMES取得関数
-async function fetchPRTimesEvents() {
-  try {
-    const feed = await parser.parseURL('https://prtimes.jp/index.rdf');
-    return feed.items
-      .filter(item => isEventRelated(item))
-      .map(item => ({
-        id: item.guid || item.link,
-        title: item.title,
-        description: item.contentSnippet || item.content,
-        url: item.link,
-        publishDate: item.pubDate || item.isoDate,
-        source: 'PRTIMES',
-        category: 'プレスリリース',
-        imageUrl: extractImageUrl(item)
-      }))
-      .slice(0, 30);
-  } catch (error) {
-    console.error('PRTIMES fetch error:', error);
-    return [];
-  }
-}
+  const allEvents = [
+    ...gizmodo,
+    ...prtimes,
+    ...prTimesCompanies,
+    ...oceans,
+    ...itmediaBusiness,
+    ...gqJapan,
+    ...wiredJP,
+    ...wwdJapan,
+    ...fashionPress,
+    ...jfa,
+    ...fcTokyo
+  ];
 
-// 商業施設イベント取得関数
-async function fetchFacilitiesEvents() {
-  const allEvents = [];
-  
-  // 各施設は簡易実装(リンクのみ)
-  allEvents.push({
-    id: 'roppongi-hills',
-    title: '六本木ヒルズ - イベント情報',
-    description: '六本木ヒルズで開催中・開催予定のイベント情報',
-    url: 'https://www.roppongihills.com/events/',
-    publishDate: new Date().toISOString(),
-    source: '六本木ヒルズ',
-    category: 'イベント',
-    imageUrl: null
-  });
-  
-  allEvents.push({
-    id: 'azabudai-hills',
-    title: '麻布台ヒルズ - イベント情報',
-    description: '麻布台ヒルズで開催中・開催予定のイベント情報',
-    url: 'https://www.azabudai-hills.com/events/',
-    publishDate: new Date().toISOString(),
-    source: '麻布台ヒルズ',
-    category: 'イベント',
-    imageUrl: null
-  });
-  
-  allEvents.push({
-    id: 'skytree',
-    title: '東京スカイツリー - イベント情報',
-    description: '東京スカイツリーで開催中・開催予定のイベント情報',
-    url: 'https://www.tokyo-skytree.jp/event/',
-    publishDate: new Date().toISOString(),
-    source: '東京スカイツリー',
-    category: 'イベント',
-    imageUrl: null
-  });
-  
-  allEvents.push({
-    id: 'futakotamagawa-rise',
-    title: '二子玉川ライズ - イベント情報',
-    description: '二子玉川ライズで開催中・開催予定のイベント情報',
-    url: 'https://www.rise.sc/event/',
-    publishDate: new Date().toISOString(),
-    source: '二子玉川ライズ',
-    category: 'イベント',
-    imageUrl: null
-  });
-  
-  allEvents.push({
-    id: 'omotesando-hills',
-    title: '表参道ヒルズ - イベント情報',
-    description: '表参道ヒルズで開催中・開催予定のイベント情報',
-    url: 'https://www.omotesandohills.com/events/',
-    publishDate: new Date().toISOString(),
-    source: '表参道ヒルズ',
-    category: 'イベント',
-    imageUrl: null
-  });
-  
+  // 日付でソート (新しい順)
+  allEvents.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));
+
+  cache.set(cacheKey, allEvents);
   return allEvents;
 }
 
-// サーバー起動
+// エンドポイント: 全てのイベント
+app.get('/api/events/all', async (req, res) => {
+  try {
+    const events = await getAllEvents();
+    res.json({
+      success: true,
+      count: events.length,
+      events: events
+    });
+  } catch (error) {
+    console.error('Error in /api/events/all:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch events'
+    });
+  }
+});
+
+// エンドポイント: イベント関連のみ
+app.get('/api/events/filtered', async (req, res) => {
+  try {
+    const allEvents = await getAllEvents();
+    const eventOnly = allEvents.filter(item => item.isEvent);
+    
+    res.json({
+      success: true,
+      count: eventOnly.length,
+      events: eventOnly
+    });
+  } catch (error) {
+    console.error('Error in /api/events/filtered:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch filtered events'
+    });
+  }
+});
+
+// エンドポイント: 商業施設のリンク集
+app.get('/api/events/facilities', async (req, res) => {
+  try {
+    const facilities = getFacilitiesLinks();
+    res.json({
+      success: true,
+      count: facilities.length,
+      facilities: facilities
+    });
+  } catch (error) {
+    console.error('Error in /api/events/facilities:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch facilities'
+    });
+  }
+});
+
+// ヘルスチェック
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// ルートエンドポイント
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Event Aggregator API',
+    endpoints: {
+      all: '/api/events/all',
+      filtered: '/api/events/filtered',
+      facilities: '/api/events/facilities',
+      health: '/health'
+    }
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Event Aggregator API running on port ${PORT}`);
-  console.log(`📍 Access: http://localhost:${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📡 Endpoints available:`);
+  console.log(`   - GET /api/events/all`);
+  console.log(`   - GET /api/events/filtered`);
+  console.log(`   - GET /api/events/facilities`);
+  console.log(`   - GET /health`);
 });
