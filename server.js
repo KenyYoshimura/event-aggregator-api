@@ -1,5 +1,5 @@
 // イベント情報取得API
-cconst express = require('express');
+const express = require('express');
 const Parser = require('rss-parser');
 const cors = require('cors');
 const NodeCache = require('node-cache');
