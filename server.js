@@ -1,4 +1,3 @@
-// イベント情報取得API
 const express = require('express');
 const Parser = require('rss-parser');
 const cors = require('cors');
@@ -30,10 +29,11 @@ app.get('/', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Event Aggregator API',
-    version: '1.0.0',
+    version: '2.0.0',
     endpoints: {
       gizmodo: '/api/events/gizmodo',
       prtimes: '/api/events/prtimes',
+      facilities: '/api/events/facilities',
       all: '/api/events/all'
     }
   });
@@ -73,27 +73,6 @@ app.get('/api/events/prtimes', async (req, res) => {
   }
 });
 
-// すべてのイベント取得
-app.get('/api/events/all', async (req, res) => {
-  try {
-    const cached = cache.get('all_events');
-    if (cached) {
-      return res.json(cached);
-    }
-const gizmodoEvents = await fetchGizmodoEvents();
-const prtimesEvents = await fetchPRTimesEvents();
-const facilitiesEvents = await fetchFacilitiesEvents();
-const allEvents = [...gizmodoEvents, ...prtimesEvents, ...facilitiesEvents]
-      .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
-      .slice(0, 100);
-    cache.set('all_events', allEvents);
-    res.json(allEvents);
-  } catch (error) {
-    console.error('All events fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch events' });
-  }
-});  // ← この閉じ括弧を追加
-
 // 商業施設のイベント情報取得
 app.get('/api/events/facilities', async (req, res) => {
   try {
@@ -101,12 +80,37 @@ app.get('/api/events/facilities', async (req, res) => {
     if (cached) {
       return res.json(cached);
     }
+
     const events = await fetchFacilitiesEvents();
     cache.set('facilities', events);
     res.json(events);
   } catch (error) {
     console.error('Facilities fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch facilities events' });
+  }
+});
+
+// すべてのイベント取得
+app.get('/api/events/all', async (req, res) => {
+  try {
+    const cached = cache.get('all_events');
+    if (cached) {
+      return res.json(cached);
+    }
+
+    const gizmodoEvents = await fetchGizmodoEvents();
+    const prtimesEvents = await fetchPRTimesEvents();
+    const facilitiesEvents = await fetchFacilitiesEvents();
+
+    const allEvents = [...gizmodoEvents, ...prtimesEvents, ...facilitiesEvents]
+      .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
+      .slice(0, 100);
+
+    cache.set('all_events', allEvents);
+    res.json(allEvents);
+  } catch (error) {
+    console.error('All events fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch events' });
   }
 });
 
@@ -185,128 +189,68 @@ async function fetchPRTimesEvents() {
     return [];
   }
 }
+
 // 商業施設イベント取得関数
 async function fetchFacilitiesEvents() {
   const allEvents = [];
   
-  try {
-    // 六本木ヒルズ
-    const roppongihillsEvents = await fetchRoppongiHillsEvents();
-    allEvents.push(...roppongihillsEvents);
-  } catch (error) {
-    console.error('Roppongi Hills fetch error:', error);
-  }
+  // 各施設は簡易実装(リンクのみ)
+  allEvents.push({
+    id: 'roppongi-hills',
+    title: '六本木ヒルズ - イベント情報',
+    description: '六本木ヒルズで開催中・開催予定のイベント情報',
+    url: 'https://www.roppongihills.com/events/',
+    publishDate: new Date().toISOString(),
+    source: '六本木ヒルズ',
+    category: 'イベント',
+    imageUrl: null
+  });
   
-  try {
-    // 麻布台ヒルズ
-    const azabudaiEvents = await fetchAzabudaiHillsEvents();
-    allEvents.push(...azabudaiEvents);
-  } catch (error) {
-    console.error('Azabudai Hills fetch error:', error);
-  }
+  allEvents.push({
+    id: 'azabudai-hills',
+    title: '麻布台ヒルズ - イベント情報',
+    description: '麻布台ヒルズで開催中・開催予定のイベント情報',
+    url: 'https://www.azabudai-hills.com/events/',
+    publishDate: new Date().toISOString(),
+    source: '麻布台ヒルズ',
+    category: 'イベント',
+    imageUrl: null
+  });
   
-  try {
-    // 東京スカイツリー
-    const skytreeEvents = await fetchSkytreeEvents();
-    allEvents.push(...skytreeEvents);
-  } catch (error) {
-    console.error('Skytree fetch error:', error);
-  }
+  allEvents.push({
+    id: 'skytree',
+    title: '東京スカイツリー - イベント情報',
+    description: '東京スカイツリーで開催中・開催予定のイベント情報',
+    url: 'https://www.tokyo-skytree.jp/event/',
+    publishDate: new Date().toISOString(),
+    source: '東京スカイツリー',
+    category: 'イベント',
+    imageUrl: null
+  });
   
-  return allEvents
-    .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
-    .slice(0, 50);
-}
-
-// 六本木ヒルズのイベント取得
-async function fetchRoppongiHillsEvents() {
-  try {
-    const { data } = await axios.get('https://www.roppongihills.com/events/events_list.html', {
-      timeout: 10000
-    });
-    const $ = cheerio.load(data);
-    const events = [];
-    
-    $('.event-item').each((i, elem) => {
-      const title = $(elem).find('.event-title').text().trim();
-      const url = 'https://www.roppongihills.com' + $(elem).find('a').attr('href');
-      const date = $(elem).find('.event-date').text().trim();
-      
-      if (title) {
-        events.push({
-          id: `roppongi-${i}`,
-          title: title,
-          description: null,
-          url: url,
-          publishDate: new Date().toISOString(),
-          source: '六本木ヒルズ',
-          category: 'イベント',
-          imageUrl: null
-        });
-      }
-    });
-    
-    return events.slice(0, 10);
-  } catch (error) {
-    console.error('Roppongi Hills scraping error:', error);
-    return [];
-  }
-}
-
-// 麻布台ヒルズのイベント取得
-async function fetchAzabudaiHillsEvents() {
-  try {
-    const { data } = await axios.get('https://www.azabudai-hills.com/events/', {
-      timeout: 10000
-    });
-    const $ = cheerio.load(data);
-    const events = [];
-    
-    // 簡易実装: 構造が判明次第修正
-    events.push({
-      id: 'azabudai-placeholder',
-      title: '麻布台ヒルズ - イベント情報',
-      description: '公式サイトでイベント情報をご確認ください',
-      url: 'https://www.azabudai-hills.com/events/',
-      publishDate: new Date().toISOString(),
-      source: '麻布台ヒルズ',
-      category: 'イベント',
-      imageUrl: null
-    });
-    
-    return events;
-  } catch (error) {
-    console.error('Azabudai Hills scraping error:', error);
-    return [];
-  }
-}
-
-// 東京スカイツリーのイベント取得
-async function fetchSkytreeEvents() {
-  try {
-    const { data } = await axios.get('https://www.tokyo-skytree.jp/event/', {
-      timeout: 10000
-    });
-    const $ = cheerio.load(data);
-    const events = [];
-    
-    // 簡易実装: 構造が判明次第修正
-    events.push({
-      id: 'skytree-placeholder',
-      title: '東京スカイツリー - イベント情報',
-      description: '公式サイトでイベント情報をご確認ください',
-      url: 'https://www.tokyo-skytree.jp/event/',
-      publishDate: new Date().toISOString(),
-      source: '東京スカイツリー',
-      category: 'イベント',
-      imageUrl: null
-    });
-    
-    return events;
-  } catch (error) {
-    console.error('Skytree scraping error:', error);
-    return [];
-  }
+  allEvents.push({
+    id: 'futakotamagawa-rise',
+    title: '二子玉川ライズ - イベント情報',
+    description: '二子玉川ライズで開催中・開催予定のイベント情報',
+    url: 'https://www.rise.sc/event/',
+    publishDate: new Date().toISOString(),
+    source: '二子玉川ライズ',
+    category: 'イベント',
+    imageUrl: null
+  });
+  
+  allEvents.push({
+    id: 'omotesando-hills',
+    title: '表参道ヒルズ - イベント情報',
+    description: '表参道ヒルズで開催中・開催予定のイベント情報',
+    url: 'https://www.omotesandohills.com/events/',
+    publishDate: new Date().toISOString(),
+    source: '表参道ヒルズ',
+    category: 'イベント',
+    imageUrl: null
+  });
+  
+  return allEvents;
 }
 
 // サーバー起動
