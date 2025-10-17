@@ -52,12 +52,12 @@ async function fetchRSSFeed(url, sourceName) {
   }
 }
 
-// FC東京のRSSを取得 (特殊なURLから抽出)
+// FC東京のRSSを取得
 async function fetchFCTokyoRSS() {
   try {
     const response = await axios.get('http://rss.phew.homeip.net/news.php');
-    const parser = new Parser();
-    const feed = await parser.parseString(response.data);
+    const feedParser = new Parser();
+    const feed = await feedParser.parseString(response.data);
     
     // FC東京に関連する項目だけをフィルター
     const fcTokyoItems = feed.items.filter(item => 
@@ -85,14 +85,14 @@ async function fetchPRTimesCompanies() {
   
   for (const id of companyIds) {
     try {
-      const url = `https://prtimes.jp/main/html/searchrlp/company_id/${id}/rss_company.xml`;
+      const url = `https://prtimes.jp/companyrdf.php?company_id=${id}`;
       const feed = await parser.parseURL(url);
       
       const items = feed.items.map(item => ({
         title: item.title || '',
         link: item.link || '',
         pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
-        source: `PRTIMES (企業ID: ${id})`,
+        source: 'PRTIMES',
         description: item.contentSnippet || item.description || '',
         isEvent: isEventRelated(item.title) || isEventRelated(item.contentSnippet || item.description)
       }));
@@ -111,36 +111,37 @@ async function fetchGizmodoRSS() {
   return await fetchRSSFeed('https://www.gizmodo.jp/index.xml', 'GIZMODO');
 }
 
-// 既存のPRTIMESイベントRSSを取得
-async function fetchPRTimesRSS() {
-  return await fetchRSSFeed('https://prtimes.jp/technology/rss.xml', 'PRTIMES');
-}
-
-// 新しいRSSフィードを取得
+// OCEANSのRSSを取得 (Yahoo!ニュース経由)
 async function fetchOCEANS() {
-  return await fetchRSSFeed('https://oceans.tokyo.jp/feed/', 'OCEANS');
+  return await fetchRSSFeed('https://news.yahoo.co.jp/rss/media/oceans/all.xml', 'OCEANS');
 }
 
+// ITmedia ビジネスオンラインのRSSを取得
 async function fetchITmediaBusiness() {
-  return await fetchRSSFeed('https://rss.itmedia.co.jp/rss/1.0/business.xml', 'ITmedia ビジネスオンライン');
+  return await fetchRSSFeed('https://rss.itmedia.co.jp/rss/1.0/business.xml', 'ITmedia');
 }
 
+// GQ JAPANのRSSを取得 (Yahoo!ニュース経由)
 async function fetchGQJapan() {
-  return await fetchRSSFeed('https://www.gqjapan.jp/feed/', 'GQ JAPAN');
+  return await fetchRSSFeed('https://news.yahoo.co.jp/rss/media/gqjapan/all.xml', 'GQ JAPAN');
 }
 
+// WIRED.jpのRSSを取得 (Yahoo!ニュース経由)
 async function fetchWiredJP() {
-  return await fetchRSSFeed('https://wired.jp/feed/', 'WIRED.jp');
+  return await fetchRSSFeed('https://news.yahoo.co.jp/rss/media/wired/all.xml', 'WIRED.jp');
 }
 
+// WWDJAPANのRSSを取得
 async function fetchWWDJapan() {
   return await fetchRSSFeed('https://www.wwdjapan.com/feed/', 'WWDJAPAN');
 }
 
+// FASHION PRESSのRSSを取得
 async function fetchFashionPress() {
-  return await fetchRSSFeed('http://www.fashion-press.net/news/index.rss', 'FASHION PRESS');
+  return await fetchRSSFeed('http://www.fashion-press.net/news/line.rss', 'FASHION PRESS');
 }
 
+// JFAのRSSを取得
 async function fetchJFA() {
   return await fetchRSSFeed('https://www.jfa.jp/feed.rss', 'JFA');
 }
@@ -190,7 +191,6 @@ async function getAllEvents() {
   
   const [
     gizmodo,
-    prtimes,
     prTimesCompanies,
     oceans,
     itmediaBusiness,
@@ -202,7 +202,6 @@ async function getAllEvents() {
     fcTokyo
   ] = await Promise.all([
     fetchGizmodoRSS(),
-    fetchPRTimesRSS(),
     fetchPRTimesCompanies(),
     fetchOCEANS(),
     fetchITmediaBusiness(),
@@ -216,7 +215,6 @@ async function getAllEvents() {
 
   const allEvents = [
     ...gizmodo,
-    ...prtimes,
     ...prTimesCompanies,
     ...oceans,
     ...itmediaBusiness,
