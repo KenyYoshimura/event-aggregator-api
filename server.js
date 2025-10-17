@@ -3,6 +3,7 @@ const Parser = require('rss-parser');
 const cors = require('cors');
 const NodeCache = require('node-cache');
 const axios = require('axios');
+const cheerio = require('cheerio');
 
 const app = express();
 const parser = new Parser({
@@ -52,28 +53,51 @@ async function fetchRSSFeed(url, sourceName) {
   }
 }
 
-// FC東京のRSSを取得
+// FC東京のニュースをスクレイピング
 async function fetchFCTokyoRSS() {
   try {
-    const response = await axios.get('http://rss.phew.homeip.net/news.php');
-    const feedParser = new Parser();
-    const feed = await feedParser.parseString(response.data);
+    const response = await axios.get('https://www.fctokyo.co.jp/news/');
+    const $ = cheerio.load(response.data);
+    const items = [];
     
-    // FC東京に関連する項目だけをフィルター
-    const fcTokyoItems = feed.items.filter(item => 
-      item.title && (item.title.includes('FC東京') || item.title.includes('FC Tokyo'))
-    );
+    // ニュース項目を取得
+    $('li').each((index, element) => {
+      const dateText = $(element).find('time, .date, p:first').text().trim();
+      const categoryText = $(element).find('.category, span').text().trim();
+      const titleElement = $(element).find('a');
+      const title = titleElement.text().trim();
+      const link = titleElement.attr('href');
+      
+      if (title && dateText) {
+        // 日付を解析
+        let pubDate = new Date().toISOString();
+        const dateMatch = dateText.match(/(\d{4})\.(\d{1,2})\.(\d{1,2})/);
+        if (dateMatch) {
+          const [, year, month, day] = dateMatch;
+          pubDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`).toISOString();
+        }
+        
+        // 相対URLを絶対URLに変換
+        const absoluteLink = link && link.startsWith('http') 
+          ? link 
+          : `https://www.fctokyo.co.jp${link || ''}`;
+        
+        items.push({
+          title: `${categoryText} ${title}`.trim(),
+          link: absoluteLink,
+          pubDate: pubDate,
+          source: 'FC東京',
+          description: `${categoryText} ${title}`.trim(),
+          isEvent: isEventRelated(title) || categoryText.includes('イベント')
+        });
+      }
+    });
     
-    return fcTokyoItems.map(item => ({
-      title: item.title || '',
-      link: item.link || '',
-      pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
-      source: 'FC東京',
-      description: item.contentSnippet || item.description || '',
-      isEvent: isEventRelated(item.title) || isEventRelated(item.contentSnippet || item.description)
-    }));
+    console.log(`✅ FC Tokyo: Found ${items.length} news items`);
+    return items.slice(0, 30); // 最新30件を返す
+    
   } catch (error) {
-    console.error('Error fetching FC Tokyo RSS:', error.message);
+    console.error('Error fetching FC Tokyo news:', error.message);
     return [];
   }
 }
