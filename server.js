@@ -174,29 +174,54 @@ async function fetchJFA() {
 function getFacilitiesLinks() {
   return [
     {
-      name: '六本木ヒルズ',
-      link: 'https://www.roppongihills.com/events/',
-      description: '六本木ヒルズのイベント情報'
+      name: '都立公園',
+      link: 'https://www.tokyo-park.or.jp/event_search/index.html',
+      description: '都立公園のイベント情報'
     },
     {
-      name: '麻布台ヒルズ',
-      link: 'https://www.azabudai-hills.com/events/',
-      description: '麻布台ヒルズのイベント情報'
+      name: 'ライズ',
+      link: 'https://www.rise.sc/eventnews/',
+      description: 'ライズのイベント情報'
     },
     {
-      name: '東京スカイツリー',
-      link: 'https://www.tokyo-skytree.jp/event/',
-      description: '東京スカイツリーのイベント情報'
+      name: '渋谷ヒカリエ',
+      link: 'https://www.hikarie.jp/event/',
+      description: '渋谷ヒカリエのイベント情報'
     },
     {
-      name: '二子玉川ライズ',
-      link: 'https://www.rise.sc/event/',
-      description: '二子玉川ライズのイベント情報'
+      name: '渋谷パルコ',
+      link: 'https://shibuya.parco.jp/event/',
+      description: '渋谷パルコのイベント情報'
+    },
+    {
+      name: 'JPタワー',
+      link: 'https://marunouchi.jp-kitte.jp/event/eventnews.jsp?cat=1',
+      description: 'JPタワーのイベント情報'
     },
     {
       name: '表参道ヒルズ',
       link: 'https://www.omotesandohills.com/events/',
       description: '表参道ヒルズのイベント情報'
+    },
+    {
+      name: '六本木ヒルズ',
+      link: 'https://www.roppongihills.com/events/events_list.html',
+      description: '六本木ヒルズのイベント情報'
+    },
+    {
+      name: 'スカイツリー',
+      link: 'https://www.tokyo-solamachi.jp/event/list/',
+      description: 'スカイツリーのイベント情報'
+    },
+    {
+      name: 'ダイバーシティ',
+      link: 'https://mitsui-shopping-park.com/divercity-tokyo/event/',
+      description: 'ダイバーシティのイベント情報'
+    },
+    {
+      name: 'アウトドア',
+      link: 'https://gear.camplog.jp/%E3%82%A4%E3%83%99%E3%83%B3%E3%83%88/2025outdoorevent/#google_vignette',
+      description: 'アウトドアイベント情報'
     }
   ];
 }
