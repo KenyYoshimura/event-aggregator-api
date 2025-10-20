@@ -66,8 +66,21 @@ async function fetchFCTokyoRSS() {
     const $ = cheerio.load(response.data);
     const items = [];
     
+    // まず全てのリンクを収集してマッピングを作成
+    const linkMap = new Map();
+    $('a').each((i, elem) => {
+      const href = $(elem).attr('href');
+      const text = $(elem).text().trim();
+      
+      // /news/数字 のパターンを持つリンクを保存
+      if (href && href.match(/^\/news\/\d+$/)) {
+        linkMap.set(text, href);
+      }
+    });
+    
+    console.log(`✅ FC Tokyo: Found ${linkMap.size} news links with IDs`);
+    
     // より具体的なセレクターでニュース項目を取得
-    // FC東京のニュースリストの構造に合わせて調整
     const newsSelectors = [
       '.p-news__list li',
       '.p-news__item',
@@ -85,60 +98,73 @@ async function fetchFCTokyoRSS() {
       }
     }
     
-    // セレクターで見つからない場合、テキストベースで抽出
+    // セレクターで見つからない場合、HTMLから直接リンクを抽出
     if ($newsItems.length === 0) {
-      console.log('⚠️  FC Tokyo: Using text-based extraction');
+      console.log('⚠️  FC Tokyo: Using direct link extraction');
       
-      const pageText = $('body').text();
-      const lines = pageText.split('\n');
-      
-      let currentDate = '';
-      let currentCategory = '';
-      let currentTitle = '';
-      
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
+      // ニュースリンクを含むaタグを直接探す
+      const newsLinks = [];
+      $('a[href^="/news/"]').each((i, elem) => {
+        const $link = $(elem);
+        const href = $link.attr('href');
+        const title = $link.text().trim();
         
-        // 日付行を検出 (例: 2025.10.17)
-        const dateMatch = line.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})$/);
-        if (dateMatch) {
-          currentDate = line;
-          continue;
-        }
-        
-        // カテゴリ行を検出 (例: [イベント])
-        const categoryMatch = line.match(/^\[([^\]]+)\]$/);
-        if (categoryMatch) {
-          currentCategory = categoryMatch[1];
-          continue;
-        }
-        
-        // タイトル行を検出 (日付とカテゴリの後)
-        if (currentDate && currentCategory && line.length > 10 && !line.match(/^-+$/) && !line.match(/^\d{4}\.\d{1,2}\.\d{1,2}$/)) {
-          currentTitle = line;
+        // /news/数字 のパターンをチェック
+        if (href && href.match(/^\/news\/\d+$/) && title.length > 10) {
+          // リンク要素の前後から日付とカテゴリを探す
+          let dateText = '';
+          let categoryText = '';
           
-          // 日付を解析
-          const [, year, month, day] = currentDate.match(/(\d{4})\.(\d{1,2})\.(\d{1,2})/);
-          const pubDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`).toISOString();
+          // 親要素や兄弟要素から日付を探す
+          const $parent = $link.parent();
+          const parentText = $parent.text();
+          const dateMatch = parentText.match(/(\d{4})\.(\d{1,2})\.(\d{1,2})/);
           
-          items.push({
-            title: `[${currentCategory}] ${currentTitle}`,
-            link: `https://www.fctokyo.co.jp/news/`,
-            pubDate: pubDate,
-            source: 'FC東京',
-            description: `${currentCategory} ${currentTitle}`,
-            isEvent: isEventRelated(currentTitle) || currentCategory.includes('イベント')
+          if (dateMatch) {
+            dateText = dateMatch[0];
+          }
+          
+          // カテゴリを探す（[xxx]の形式）
+          const categoryMatch = parentText.match(/\[([^\]]+)\]/);
+          if (categoryMatch) {
+            categoryText = categoryMatch[1];
+          }
+          
+          newsLinks.push({
+            title,
+            href,
+            dateText,
+            categoryText
           });
-          
-          // リセット
-          currentDate = '';
-          currentCategory = '';
-          currentTitle = '';
-          
-          // 最大30件まで
-          if (items.length >= 30) break;
         }
-      }
+      });
+      
+      console.log(`✅ FC Tokyo: Found ${newsLinks.length} news links via direct extraction`);
+      
+      // ニュースリンクをアイテムに変換
+      newsLinks.slice(0, 30).forEach(news => {
+        let pubDate = new Date().toISOString();
+        
+        if (news.dateText) {
+          const dateMatch = news.dateText.match(/(\d{4})\.(\d{1,2})\.(\d{1,2})/);
+          if (dateMatch) {
+            const [, year, month, day] = dateMatch;
+            pubDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`).toISOString();
+          }
+        }
+        
+        const fullTitle = news.categoryText ? `[${news.categoryText}] ${news.title}` : news.title;
+        
+        items.push({
+          title: fullTitle,
+          link: `https://www.fctokyo.co.jp${news.href}`,
+          pubDate: pubDate,
+          source: 'FC東京',
+          description: fullTitle,
+          isEvent: isEventRelated(news.title) || (news.categoryText && news.categoryText.includes('イベント'))
+        });
+      });
+      
     } else {
       // セレクターで見つかった場合の処理
       $newsItems.each((index, element) => {
