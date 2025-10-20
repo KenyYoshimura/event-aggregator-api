@@ -290,6 +290,26 @@ async function fetchJFA() {
   return await fetchRSSFeed('https://www.jfa.jp/feed.rss', 'JFA');
 }
 
+// Traicy 航空券セール情報のRSSを取得
+async function fetchTraicySales() {
+  try {
+    const url = 'https://www.traicy.com/category/airline/sale/feed/';
+    const feed = await parser.parseURL(url);
+    
+    return feed.items.map(item => ({
+      title: item.title || '',
+      link: item.link || '',
+      pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
+      source: 'Traicy',
+      description: item.contentSnippet || item.description || '',
+      isEvent: true // セール情報は全てイベント扱い
+    }));
+  } catch (error) {
+    console.error('Error fetching Traicy sales:', error.message);
+    return [];
+  }
+}
+
 // 商業施設のリンク集
 function getFacilitiesLinks() {
   return [
@@ -368,7 +388,8 @@ async function getAllEvents() {
     wwdJapan,
     fashionPress,
     jfa,
-    fcTokyo
+    fcTokyo,
+    traicySales
   ] = await Promise.all([
     fetchGizmodoRSS(),
     fetchPRTimesCompanies(),
@@ -379,7 +400,8 @@ async function getAllEvents() {
     fetchWWDJapan(),
     fetchFashionPress(),
     fetchJFA(),
-    fetchFCTokyoRSS()
+    fetchFCTokyoRSS(),
+    fetchTraicySales()
   ]);
 
   const allEvents = [
@@ -392,7 +414,8 @@ async function getAllEvents() {
     ...wwdJapan,
     ...fashionPress,
     ...jfa,
-    ...fcTokyo
+    ...fcTokyo,
+    ...traicySales
   ];
 
   // 日付でソート (新しい順)
